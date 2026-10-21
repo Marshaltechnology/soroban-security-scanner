@@ -128,6 +128,22 @@ Two consequences are easy to get wrong:
 - `--max-findings` is applied after the gate: truncating the report can never
   hide the finding that caused a non-zero exit.
 
+## Machine-readable baseline status
+
+When `--baseline` is supplied, machine formats carry the comparison instead of
+leaving it only on stderr (additive fields; consumers that ignore them are
+unaffected):
+
+- **JSON:** `baseline` contains `new`, `existing`, `resolved`, and a
+  `statuses` map from fingerprint to `new`/`existing`. Each finding may also
+  carry `baseline_status`. `resolved` entries are not findings, so they appear
+  only in the summary.
+- **SARIF:** `runs[0].properties.baseline` carries the same summary, and each
+  result may carry `properties.baselineStatus` with `new` or `existing`.
+
+`--incremental` sets the summary's `resolved` count to `0`, matching its
+stderr behavior.
+
 ## Fingerprints
 
 Fingerprints are computed from the **rule id**, the **scan-relative file path**,

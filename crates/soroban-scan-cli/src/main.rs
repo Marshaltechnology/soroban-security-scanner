@@ -695,6 +695,10 @@ fn run_scan(args: ScanArgs, registry: &RuleRegistry) -> CliResult<u8> {
             .diagnostics
             .extend(baseline.unknown_rule_diagnostics(registry));
         let comparison = baseline::compare(&outcome.findings, &baseline);
+        outcome.baseline = Some(baseline::BaselineReport::from_comparison(
+            &comparison,
+            &outcome.findings,
+        ));
         let resolved = if args.incremental {
             0
         } else {

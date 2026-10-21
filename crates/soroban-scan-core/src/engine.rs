@@ -161,6 +161,9 @@ pub struct ScanOutcome {
     /// Per-rule wall-clock timings, in registration order (or rule id order
     /// after merging roots). Presentation-only; never serialized into reports.
     pub rule_timings: Vec<RuleTiming>,
+    /// Baseline comparison summary and per-finding status, when a baseline
+    /// was supplied. Serialized additively into JSON and SARIF reports.
+    pub baseline: Option<crate::baseline::BaselineReport>,
 }
 
 impl ScanOutcome {
@@ -797,6 +800,7 @@ pub fn scan(loaded: &LoadedProject, registry: &RuleRegistry, config: &ScanConfig
         config_suppressions,
         truncation: None,
         rule_timings,
+        baseline: None,
     }
 }
 
@@ -911,6 +915,7 @@ pub fn merge(outcomes: Vec<ScanOutcome>, labels: &[String]) -> ScanOutcome {
         config_suppressions,
         truncation: None,
         rule_timings,
+        baseline: None,
     }
 }
 

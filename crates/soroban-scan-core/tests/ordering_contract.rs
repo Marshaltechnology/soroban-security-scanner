@@ -92,6 +92,7 @@ fn outcome_with(findings: Vec<Finding>) -> ScanOutcome {
         config_suppressions: vec![],
         truncation: None,
         rule_timings: vec![],
+        baseline: None,
     }
 }
 

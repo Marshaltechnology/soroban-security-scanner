@@ -280,6 +280,42 @@ impl Comparison {
     }
 }
 
+/// Machine-readable baseline state attached to a scan outcome (#155).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BaselineReport {
+    /// Findings not present in the baseline.
+    pub new: usize,
+    /// Findings already present in the baseline.
+    pub existing: usize,
+    /// Baseline entries no longer present in the scan.
+    pub resolved: usize,
+    /// ``fingerprint -> "new" | "existing"`` for every reported finding.
+    pub statuses: BTreeMap<String, String>,
+}
+
+impl BaselineReport {
+    /// Builds the report from a comparison and the scanned findings.
+    pub fn from_comparison(comparison: &Comparison, findings: &[Finding]) -> Self {
+        let mut statuses = BTreeMap::new();
+        for index in &comparison.new {
+            if let Some(finding) = findings.get(*index) {
+                statuses.insert(finding.fingerprint.clone(), "new".to_string());
+            }
+        }
+        for index in &comparison.existing {
+            if let Some(finding) = findings.get(*index) {
+                statuses.insert(finding.fingerprint.clone(), "existing".to_string());
+            }
+        }
+        BaselineReport {
+            new: comparison.new_count(),
+            existing: comparison.existing_count(),
+            resolved: comparison.resolved_count(),
+            statuses,
+        }
+    }
+}
+
 /// Compares findings against a baseline by fingerprint.
 pub fn compare(findings: &[Finding], baseline: &Baseline) -> Comparison {
     let baseline_fingerprints = baseline.fingerprints();

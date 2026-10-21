@@ -420,14 +420,26 @@ struct JsonReport<'a> {
     /// `ScanConfig` contains only scan settings: it has no environment data,
     /// credentials, or absolute user paths.
     effective_config: &'a ScanConfig,
-    findings: &'a [Finding],
+    findings: Vec<JsonFinding<'a>>,
     suppressed: &'a [SuppressedFinding],
     suppressions: Vec<SuppressionJson>,
     config_suppressions: &'a [ConfigSuppressionReport],
     diagnostics: &'a [Diagnostic],
+    /// Present only when a baseline was supplied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    baseline: Option<&'a crate::baseline::BaselineReport>,
     /// Present only when the caller bounded the number of reported findings.
     #[serde(skip_serializing_if = "Option::is_none")]
     truncation: Option<FindingTruncation>,
+}
+
+/// A finding with its additive baseline status when a baseline was supplied.
+#[derive(Debug, Serialize)]
+struct JsonFinding<'a> {
+    #[serde(flatten)]
+    finding: &'a Finding,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    baseline_status: Option<&'a str>,
 }
 
 /// Tool identity in JSON reports.
@@ -511,6 +523,18 @@ fn suppression_reports(outcome: &ScanOutcome) -> Vec<SuppressionJson> {
 }
 /// Renders the JSON report.
 pub fn render_json(outcome: &ScanOutcome) -> Result<String, serde_json::Error> {
+    let findings: Vec<JsonFinding> = outcome
+        .findings
+        .iter()
+        .map(|finding| JsonFinding {
+            finding,
+            baseline_status: outcome
+                .baseline
+                .as_ref()
+                .and_then(|report| report.statuses.get(&finding.fingerprint))
+                .map(String::as_str),
+        })
+        .collect();
     let report = JsonReport {
         schema_version: REPORT_SCHEMA_VERSION,
         tool: ToolInfo {
@@ -544,11 +568,12 @@ pub fn render_json(outcome: &ScanOutcome) -> Result<String, serde_json::Error> {
             findings_by_category: outcome.stats.findings_by_category.clone(),
         },
         effective_config: &outcome.config,
-        findings: &outcome.findings,
+        findings,
         suppressed: &outcome.suppressed,
         suppressions: suppression_reports(outcome),
         config_suppressions: &outcome.config_suppressions,
         diagnostics: &outcome.diagnostics,
+        baseline: outcome.baseline.as_ref(),
         truncation: outcome.truncation,
     };
     serde_json::to_string_pretty(&report)
@@ -761,7 +786,17 @@ pub fn render_sarif(outcome: &ScanOutcome, registry: &RuleRegistry) -> String {
     let mut results: Vec<Value> = outcome
         .findings
         .iter()
-        .map(|finding| sarif_result(finding, None))
+        .map(|finding| {
+            let mut result = sarif_result(finding, None);
+            if let Some(status) = outcome
+                .baseline
+                .as_ref()
+                .and_then(|report| report.statuses.get(&finding.fingerprint))
+            {
+                result["properties"]["baselineStatus"] = json!(status);
+            }
+            result
+        })
         .collect();
 
     // Suppressed findings are never dropped: they stay in the SARIF results and
@@ -785,8 +820,18 @@ pub fn render_sarif(outcome: &ScanOutcome, registry: &RuleRegistry) -> String {
         "results": results
     });
 
+    if let Some(report) = &outcome.baseline {
+        if !run["properties"].is_object() {
+            run["properties"] = json!({});
+        }
+        run["properties"]["baseline"] = json!(report);
+    }
+
     if let Some(truncation) = outcome.truncation {
-        run["properties"] = json!({ "truncation": truncation });
+        if !run["properties"].is_object() {
+            run["properties"] = json!({});
+        }
+        run["properties"]["truncation"] = json!(truncation);
         run["invocations"] = json!([{
             "executionSuccessful": true,
             "toolExecutionNotifications": [{

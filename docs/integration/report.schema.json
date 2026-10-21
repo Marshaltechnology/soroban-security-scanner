@@ -177,10 +177,31 @@
           "evidence": { "type": "string" },
           "remediation": { "type": "string" },
           "references": { "type": "array", "items": { "type": "string" } },
-          "fingerprint": { "type": "string" }
+          "fingerprint": { "type": "string" },
+          "baseline_status": {
+            "type": "string",
+            "enum": ["new", "existing"],
+            "description": "Present when a baseline was supplied. `resolved` entries are not findings and appear only in the top-level baseline summary."
+          }
         },
         "additionalProperties": true
       }
+    },
+    "baseline": {
+      "description": "Present only when one or more `--baseline` files were supplied. Counts are over the gated findings after de-duplication.",
+      "type": "object",
+      "required": ["new", "existing", "resolved", "statuses"],
+      "properties": {
+        "new": { "type": "integer", "minimum": 0 },
+        "existing": { "type": "integer", "minimum": 0 },
+        "resolved": { "type": "integer", "minimum": 0 },
+        "statuses": {
+          "type": "object",
+          "description": "Fingerprint -> `new` or `existing` for the reported findings.",
+          "additionalProperties": { "type": "string", "enum": ["new", "existing"] }
+        }
+      },
+      "additionalProperties": true
     },
     "truncation": {
       "description": "Present only when the report was bounded with `--max-findings`. The failure gate is evaluated before truncation.",
