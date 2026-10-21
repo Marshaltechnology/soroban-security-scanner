@@ -83,6 +83,25 @@ bounds for adversarial inputs (deeply chained helpers, many entry points with
 cross-calls). These guard against algorithmic regressions — such as quadratic
 helper-summary expansion — and are not precise benchmarks.
 
+## Baseline comparison at scale
+
+Baseline comparison now builds one hash set for the accepted fingerprints and
+walks the findings once. Measure it with the release example:
+
+```bash
+cargo run --release -p soroban-scan-core --example baseline_benchmark
+```
+
+Illustrative run on a developer Windows machine (Rust 1.99):
+
+```text
+findings=50000 baseline=40000 new=10000 existing=40000 resolved=0 elapsed=65.8588ms
+```
+
+The companion test `crates/soroban-scan-core/tests/baseline_scale.rs` guards the
+20,000-finding shape with a generous upper bound, so a return to per-check set
+rebuilding or quadratic behavior fails even on a slow runner.
+
 ## Interpreting results
 
 - Cost scales linearly with source size, which is expected for a

@@ -5,7 +5,7 @@
 //! resolved. Fingerprints deliberately exclude line numbers so unrelated code
 //! shifts do not resurrect known findings.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -282,8 +282,14 @@ impl Comparison {
 
 /// Compares findings against a baseline by fingerprint.
 pub fn compare(findings: &[Finding], baseline: &Baseline) -> Comparison {
-    let baseline_fingerprints = baseline.fingerprints();
-    let mut current: BTreeSet<&str> = BTreeSet::new();
+    // A single hash set built once makes both membership checks O(1) on average;
+    // the previous per-call BTreeSet rebuild was O(n log n) for every scan.
+    let baseline_fingerprints: HashSet<&str> = baseline
+        .findings
+        .iter()
+        .map(|entry| entry.fingerprint.as_str())
+        .collect();
+    let mut current: HashSet<&str> = HashSet::with_capacity(findings.len());
 
     let mut new = Vec::new();
     let mut existing = Vec::new();
