@@ -15,7 +15,6 @@ examples/*/target/
 
 # IDE / editor
 .idea/
-.vscode/
 *.swp
 *.swo
 *~
@@ -26,6 +25,7 @@ Thumbs.db
 desktop.ini
 
 # Python supporting tooling
+temp_auto_push.bat
 __pycache__/
 *.py[cod]
 .venv/
@@ -53,3 +53,5 @@ fuzz/target/
 fuzz/corpus/
 fuzz/artifacts/
 fuzz/coverage/
+.gitignore
+branch_structure.json
