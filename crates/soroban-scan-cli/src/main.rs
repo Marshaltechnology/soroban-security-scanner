@@ -13,7 +13,7 @@ use std::time::Instant;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use soroban_scan_core::ai::{self, Assistant};
-use soroban_scan_core::baseline::{self, Baseline};
+use soroban_scan_core::baseline::{self, Baseline, BaselineReport};
 use soroban_scan_core::category::Category;
 use soroban_scan_core::confidence::Confidence;
 use soroban_scan_core::config::ScanConfig;
@@ -680,6 +680,7 @@ fn run_scan(args: ScanArgs, registry: &RuleRegistry) -> CliResult<u8> {
         return Ok(EXIT_SUCCESS);
     }
 
+    let mut baseline_report: Option<BaselineReport> = None;
     let mut new_indices: Option<Vec<usize>> = None;
     if !args.baseline.is_empty() {
         let mut baselines = Vec::with_capacity(args.baseline.len());
@@ -713,6 +714,11 @@ fn run_scan(args: ScanArgs, registry: &RuleRegistry) -> CliResult<u8> {
                 }
             );
         }
+        baseline_report = Some(BaselineReport::from_comparison(
+            &outcome.findings,
+            &comparison,
+            !args.incremental,
+        ));
         new_indices = Some(comparison.new);
     }
 
@@ -759,7 +765,12 @@ fn run_scan(args: ScanArgs, registry: &RuleRegistry) -> CliResult<u8> {
     } else if matches!(args.format, FormatArg::Terminal) {
         report::render_terminal_with_color(&outcome, color)
     } else {
-        report::render(&outcome, registry, args.format.into())
+        report::render_with_baseline(
+            &outcome,
+            registry,
+            args.format.into(),
+            baseline_report.as_ref(),
+        )
     };
 
     match &args.output {

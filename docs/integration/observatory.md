@@ -194,6 +194,9 @@ scanner without a coordinated release, and vice versa.
 - `schema_version` `1` gained `stats.suppressions_detected`,
   `stats.findings_suppressed`, and the `suppressed` and `suppressions` arrays
   (additive, inline suppressions).
+- `schema_version` `1` gained the optional top-level `baseline` object and the
+  per-finding `baseline_status` field, present only when the scan is compared
+  against a baseline (additive, baseline comparison).
 
 When the contract changes, update this table and
 [`report.schema.json`](report.schema.json) together.

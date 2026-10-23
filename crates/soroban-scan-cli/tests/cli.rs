@@ -696,6 +696,81 @@ fn baseline_suppresses_existing_findings() {
 }
 
 #[test]
+fn baseline_machine_reports_include_status() {
+    let dir = std::env::temp_dir().join(format!("soroban-scan-cli-bl-json-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let baseline_path = dir.join("baseline.json");
+
+    let write = run(&[
+        "scan",
+        fixture("corpus/SS-001").to_str().unwrap(),
+        "--write-baseline",
+        baseline_path.to_str().unwrap(),
+        "--quiet",
+    ]);
+    assert_eq!(write.code, 0);
+
+    // Remove one accepted fingerprint so it is reported as new, and add an entry
+    // that no longer appears in the scan so it is reported as resolved.
+    let text = std::fs::read_to_string(&baseline_path).unwrap();
+    let mut baseline: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let removed = baseline["findings"].as_array_mut().unwrap().remove(0);
+    let removed_fingerprint = removed["fingerprint"].as_str().unwrap().to_string();
+    baseline["findings"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "fingerprint": "resolved-entry",
+            "rule_id": "SS-001",
+            "file": "src/gone.rs",
+            "severity": "high",
+            "title": "Gone"
+        }));
+    std::fs::write(
+        &baseline_path,
+        serde_json::to_string_pretty(&baseline).unwrap(),
+    )
+    .unwrap();
+
+    let out = run(&[
+        "scan",
+        fixture("corpus/SS-001").to_str().unwrap(),
+        "--baseline",
+        baseline_path.to_str().unwrap(),
+        "--fail-on",
+        "none",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+
+    let report: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    assert_eq!(report["baseline"]["new"], 1);
+    assert_eq!(report["baseline"]["resolved"], 1);
+    assert_eq!(
+        report["baseline"]["resolved_findings"][0]["fingerprint"],
+        "resolved-entry"
+    );
+    let findings = report["findings"].as_array().unwrap();
+    assert!(findings.iter().any(|finding| {
+        finding["fingerprint"] == removed_fingerprint.as_str()
+            && finding["baseline_status"] == "new"
+    }));
+    for finding in findings {
+        assert!(
+            matches!(
+                finding["baseline_status"].as_str().unwrap(),
+                "new" | "existing"
+            ),
+            "unexpected status in {finding}"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn truncated_baseline_reports_actionable_runtime_error() {
     let dir = std::env::temp_dir().join(format!("soroban-scan-cli-bad-bl-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

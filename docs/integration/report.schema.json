@@ -177,10 +177,57 @@
           "evidence": { "type": "string" },
           "remediation": { "type": "string" },
           "references": { "type": "array", "items": { "type": "string" } },
-          "fingerprint": { "type": "string" }
+          "fingerprint": { "type": "string" },
+          "baseline_status": {
+            "type": "string",
+            "enum": ["new", "existing"],
+            "description": "Present only when the scan was compared against a baseline via `--baseline`."
+          }
         },
         "additionalProperties": true
       }
+    },
+    "baseline": {
+      "description": "Present only when the scan was compared against a baseline via `--baseline`. Carries summary counts and the entries that are no longer present.",
+      "type": "object",
+      "required": ["new", "existing", "resolved"],
+      "properties": {
+        "new": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Findings not present in the baseline."
+        },
+        "existing": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Findings already accepted by the baseline."
+        },
+        "resolved": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Baseline entries no longer present in the scan. Always `0` for incremental scans."
+        },
+        "resolved_findings": {
+          "type": "array",
+          "description": "Resolved baseline entries; omitted when empty.",
+          "items": {
+            "type": "object",
+            "required": ["fingerprint", "rule_id", "file", "severity", "title"],
+            "properties": {
+              "fingerprint": { "type": "string" },
+              "rule_id": { "type": "string", "pattern": "^SS-[0-9]{3}$" },
+              "file": { "type": "string" },
+              "severity": {
+                "type": "string",
+                "enum": ["info", "low", "medium", "high", "critical"]
+              },
+              "title": { "type": "string" }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
     },
     "truncation": {
       "description": "Present only when the report was bounded with `--max-findings`. The failure gate is evaluated before truncation.",
