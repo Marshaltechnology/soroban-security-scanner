@@ -83,6 +83,29 @@ bounds for adversarial inputs (deeply chained helpers, many entry points with
 cross-calls). These guard against algorithmic regressions — such as quadratic
 helper-summary expansion — and are not precise benchmarks.
 
+## Baseline comparison
+
+`crates/soroban-scan-core/examples/benchmark_baseline.rs` measures parsing,
+index construction and comparison for synthetic baselines. Comparison builds one
+fingerprint index per run and makes a single pass over the findings.
+
+```bash
+cargo run --release -p soroban-scan-core --example benchmark_baseline
+```
+
+Illustrative release numbers (Windows 11, Rust 1.99.1; `peak_rss` is reported on
+Linux only):
+
+| Entries | JSON bytes | Parse | Index | Compare | Resolved |
+| ------- | ---------- | ----- | ----- | ------- | -------- |
+| 10,000 | 1.7 MB | 13 ms | 2 ms | 23 ms | 5,000 |
+| 50,000 | 8.8 MB | 51 ms | 13 ms | 132 ms | 25,000 |
+| 200,000 | 35 MB | 212 ms | 43 ms | 636 ms | 100,000 |
+
+Comparison cost stays linear in findings plus baseline entries. Baseline
+documents above 64 MiB are rejected before parsing, so untrusted input cannot
+force unbounded memory use.
+
 ## Interpreting results
 
 - Cost scales linearly with source size, which is expected for a

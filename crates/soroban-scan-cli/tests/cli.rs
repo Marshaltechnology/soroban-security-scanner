@@ -696,6 +696,38 @@ fn baseline_suppresses_existing_findings() {
 }
 
 #[test]
+fn oversized_baseline_is_rejected_before_reading() {
+    let dir = std::env::temp_dir().join(format!("soroban-scan-cli-bl-big-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let baseline = dir.join("huge.json");
+
+    // A sparse file: the size is reported by metadata without writing the data.
+    let file = std::fs::File::create(&baseline).unwrap();
+    file.set_len(soroban_scan_core::baseline::MAX_BASELINE_BYTES as u64 + 1)
+        .unwrap();
+    drop(file);
+
+    let out = run(&[
+        "scan",
+        fixture("corpus/SS-001").to_str().unwrap(),
+        "--baseline",
+        baseline.to_str().unwrap(),
+        "--fail-on",
+        "none",
+    ]);
+
+    assert_eq!(out.code, 3, "stderr: {}", out.stderr);
+    assert!(
+        out.stderr.to_lowercase().contains("too large"),
+        "got: {}",
+        out.stderr
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn truncated_baseline_reports_actionable_runtime_error() {
     let dir = std::env::temp_dir().join(format!("soroban-scan-cli-bad-bl-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
