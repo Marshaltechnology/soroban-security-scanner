@@ -15,7 +15,6 @@ examples/*/target/
 
 # IDE / editor
 .idea/
-.vscode/
 *.swp
 *.swo
 *~
@@ -39,8 +38,6 @@ venv/
 .scanner-cache/
 
 # Secrets / environment
-.env
-.env.*
 !.env.example
 *.pem
 *.key
@@ -53,3 +50,5 @@ fuzz/target/
 fuzz/corpus/
 fuzz/artifacts/
 fuzz/coverage/
+config.bat
+node_modules
