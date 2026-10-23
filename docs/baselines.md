@@ -23,6 +23,9 @@ The terminal summary reports `new`, `existing`, and `resolved` counts. When a
 baseline is supplied, the `--fail-on` gate considers **only new findings**, so
 known issues do not fail CI.
 
+Baseline documents are rejected above 64 MiB before parsing, so an untrusted
+file cannot force unbounded memory use.
+
 Use `--new-only` to print only new findings:
 
 ```bash
