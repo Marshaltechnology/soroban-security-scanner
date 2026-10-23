@@ -6,9 +6,15 @@
 
 use std::time::{Duration, Instant};
 
+use soroban_scan_core::baseline::{compare, Baseline, BaselineEntry, BASELINE_VERSION};
+use soroban_scan_core::category::Category;
+use soroban_scan_core::confidence::Confidence;
 use soroban_scan_core::config::ScanConfig;
 use soroban_scan_core::engine;
+use soroban_scan_core::finding::{Finding, SourceLocation};
 use soroban_scan_core::registry::RuleRegistry;
+use soroban_scan_core::rule::RuleMetadata;
+use soroban_scan_core::severity::Severity;
 
 fn scan(src: &str) -> engine::ScanOutcome {
     let registry = RuleRegistry::with_default_rules();
@@ -64,5 +70,62 @@ fn many_functions_with_cross_calls_scale() {
     assert!(
         elapsed < Duration::from_secs(30),
         "many-function scan took too long: {elapsed:?}"
+    );
+}
+
+#[test]
+fn baseline_comparison_is_linear_and_reuses_its_index() {
+    const N: usize = 100_000;
+
+    let meta = RuleMetadata::new(
+        "SS-001",
+        "Test",
+        "test description long enough for validation purposes",
+        Category::Authorization,
+        Severity::High,
+        Confidence::Medium,
+        "fix",
+    );
+    let template = Finding::new(&meta, SourceLocation::new("src/lib.rs", 1), "evidence");
+
+    let baseline = Baseline {
+        version: BASELINE_VERSION,
+        tool: "soroban-scan".to_string(),
+        tool_version: "0.0.0".to_string(),
+        format: None,
+        findings: (0..N)
+            .map(|i| BaselineEntry {
+                fingerprint: format!("fp-{i:08}"),
+                rule_id: "SS-001".to_string(),
+                file: "src/lib.rs".to_string(),
+                severity: Severity::High,
+                title: "Test".to_string(),
+            })
+            .collect(),
+    };
+
+    // Even indexes are known to the baseline; odd indexes are new.
+    let findings: Vec<Finding> = (0..N)
+        .map(|i| {
+            let mut finding = template.clone();
+            finding.fingerprint = if i % 2 == 0 {
+                format!("fp-{i:08}")
+            } else {
+                format!("new-{i:08}")
+            };
+            finding
+        })
+        .collect();
+
+    let start = Instant::now();
+    let comparison = compare(&findings, &baseline);
+    let elapsed = start.elapsed();
+
+    assert_eq!(comparison.existing_count(), N / 2);
+    assert_eq!(comparison.new_count(), N / 2);
+    assert_eq!(comparison.resolved_count(), N / 2);
+    assert!(
+        elapsed < Duration::from_secs(30),
+        "large baseline comparison took too long: {elapsed:?}"
     );
 }
