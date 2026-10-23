@@ -35,6 +35,9 @@ when `--baseline` is supplied:
 Incremental scans report `resolved` as `0`, because missing findings are not
 treated as resolved.
 
+Baseline documents are rejected above 64 MiB before parsing, so an untrusted
+file cannot force unbounded memory use.
+
 Use `--new-only` to print only new findings:
 
 ```bash
