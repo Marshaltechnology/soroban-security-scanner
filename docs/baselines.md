@@ -23,6 +23,18 @@ The terminal summary reports `new`, `existing`, and `resolved` counts. When a
 baseline is supplied, the `--fail-on` gate considers **only new findings**, so
 known issues do not fail CI.
 
+Machine-readable reports carry the same comparison. These fields appear only
+when `--baseline` is supplied:
+
+- **JSON** adds a top-level `baseline` object with `new`, `existing`, and
+  `resolved` counts plus `resolved_findings`. Each entry in `findings` gains a
+  `baseline_status` of `new` or `existing`.
+- **SARIF** adds `properties.baselineStatus` to each result and the same summary
+  under `runs[0].properties.baseline`.
+
+Incremental scans report `resolved` as `0`, because missing findings are not
+treated as resolved.
+
 Use `--new-only` to print only new findings:
 
 ```bash

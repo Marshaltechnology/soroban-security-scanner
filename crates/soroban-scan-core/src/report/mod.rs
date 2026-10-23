@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
+use crate::baseline::{BaselineReport, BaselineStatus};
 use crate::config::ScanConfig;
 use crate::engine::{
     ConfigSuppressionReport, FindingTruncation, ScanOutcome, SuppressedFinding, SuppressionInfo,
@@ -83,11 +84,22 @@ impl OutputFormat {
 
 /// Renders a scan outcome in the requested format.
 pub fn render(outcome: &ScanOutcome, registry: &RuleRegistry, format: OutputFormat) -> String {
+    render_with_baseline(outcome, registry, format, None)
+}
+
+/// Renders a scan outcome in the requested format, attaching an optional
+/// baseline comparison to machine-readable output.
+pub fn render_with_baseline(
+    outcome: &ScanOutcome,
+    registry: &RuleRegistry,
+    format: OutputFormat,
+    baseline: Option<&BaselineReport>,
+) -> String {
     match format {
         OutputFormat::Terminal => render_terminal(outcome),
-        OutputFormat::Json => render_json(outcome)
+        OutputFormat::Json => render_json_with_baseline(outcome, baseline)
             .unwrap_or_else(|e| format!("{{\"error\":\"failed to serialize report: {e}\"}}")),
-        OutputFormat::Sarif => render_sarif(outcome, registry),
+        OutputFormat::Sarif => render_sarif_with_baseline(outcome, registry, baseline),
         OutputFormat::Markdown => render_markdown(outcome),
         OutputFormat::Html => render_html(outcome),
         OutputFormat::Github => render_github(outcome),
@@ -420,7 +432,10 @@ struct JsonReport<'a> {
     /// `ScanConfig` contains only scan settings: it has no environment data,
     /// credentials, or absolute user paths.
     effective_config: &'a ScanConfig,
-    findings: &'a [Finding],
+    /// Present only when the scan was compared against a baseline.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    baseline: Option<&'a BaselineReport>,
+    findings: Vec<FindingJson<'a>>,
     suppressed: &'a [SuppressedFinding],
     suppressions: Vec<SuppressionJson>,
     config_suppressions: &'a [ConfigSuppressionReport],
@@ -428,6 +443,16 @@ struct JsonReport<'a> {
     /// Present only when the caller bounded the number of reported findings.
     #[serde(skip_serializing_if = "Option::is_none")]
     truncation: Option<FindingTruncation>,
+}
+
+/// A finding in the JSON report, optionally carrying baseline state.
+#[derive(Debug, Serialize)]
+struct FindingJson<'a> {
+    #[serde(flatten)]
+    finding: &'a Finding,
+    /// Present only when the scan was compared against a baseline.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    baseline_status: Option<BaselineStatus>,
 }
 
 /// Tool identity in JSON reports.
@@ -511,6 +536,22 @@ fn suppression_reports(outcome: &ScanOutcome) -> Vec<SuppressionJson> {
 }
 /// Renders the JSON report.
 pub fn render_json(outcome: &ScanOutcome) -> Result<String, serde_json::Error> {
+    render_json_with_baseline(outcome, None)
+}
+
+/// Renders the JSON report with an optional baseline comparison.
+pub fn render_json_with_baseline(
+    outcome: &ScanOutcome,
+    baseline: Option<&BaselineReport>,
+) -> Result<String, serde_json::Error> {
+    let findings = outcome
+        .findings
+        .iter()
+        .map(|finding| FindingJson {
+            finding,
+            baseline_status: baseline.and_then(|report| report.status(&finding.fingerprint)),
+        })
+        .collect();
     let report = JsonReport {
         schema_version: REPORT_SCHEMA_VERSION,
         tool: ToolInfo {
@@ -544,7 +585,8 @@ pub fn render_json(outcome: &ScanOutcome) -> Result<String, serde_json::Error> {
             findings_by_category: outcome.stats.findings_by_category.clone(),
         },
         effective_config: &outcome.config,
-        findings: &outcome.findings,
+        baseline,
+        findings,
         suppressed: &outcome.suppressed,
         suppressions: suppression_reports(outcome),
         config_suppressions: &outcome.config_suppressions,
@@ -648,7 +690,11 @@ pub fn render_github(outcome: &ScanOutcome) -> String {
 ///
 /// When `suppression` is set, the result is marked as an in-source
 /// suppression (SARIF 2.1.0) instead of being dropped from the report.
-fn sarif_result(finding: &Finding, suppression: Option<&SuppressionInfo>) -> serde_json::Value {
+fn sarif_result(
+    finding: &Finding,
+    suppression: Option<&SuppressionInfo>,
+    baseline_status: Option<BaselineStatus>,
+) -> serde_json::Value {
     use serde_json::json;
 
     let mut region = json!({ "startLine": finding.location.line });
@@ -680,6 +726,10 @@ fn sarif_result(finding: &Finding, suppression: Option<&SuppressionInfo>) -> ser
             "remediation": finding.remediation
         }
     });
+
+    if let Some(status) = baseline_status {
+        result["properties"]["baselineStatus"] = json!(status.as_str());
+    }
 
     if let Some(suppression) = suppression {
         let (kind, suppressed_by, default_reason) = match suppression.source {
@@ -717,6 +767,15 @@ fn sarif_result(finding: &Finding, suppression: Option<&SuppressionInfo>) -> ser
 
 /// Renders the SARIF 2.1.0 report.
 pub fn render_sarif(outcome: &ScanOutcome, registry: &RuleRegistry) -> String {
+    render_sarif_with_baseline(outcome, registry, None)
+}
+
+/// Renders the SARIF 2.1.0 report with an optional baseline comparison.
+pub fn render_sarif_with_baseline(
+    outcome: &ScanOutcome,
+    registry: &RuleRegistry,
+    baseline: Option<&BaselineReport>,
+) -> String {
     use serde_json::{json, Value};
 
     let rules: Vec<Value> = registry
@@ -761,16 +820,21 @@ pub fn render_sarif(outcome: &ScanOutcome, registry: &RuleRegistry) -> String {
     let mut results: Vec<Value> = outcome
         .findings
         .iter()
-        .map(|finding| sarif_result(finding, None))
+        .map(|finding| {
+            sarif_result(
+                finding,
+                None,
+                baseline.and_then(|report| report.status(&finding.fingerprint)),
+            )
+        })
         .collect();
 
     // Suppressed findings are never dropped: they stay in the SARIF results and
     // are marked as in-source suppressions (SARIF 2.1.0 `suppressions`).
     results.extend(
-        outcome
-            .suppressed
-            .iter()
-            .map(|suppressed| sarif_result(&suppressed.finding, Some(&suppressed.suppression))),
+        outcome.suppressed.iter().map(|suppressed| {
+            sarif_result(&suppressed.finding, Some(&suppressed.suppression), None)
+        }),
     );
 
     let mut run = json!({
@@ -785,8 +849,12 @@ pub fn render_sarif(outcome: &ScanOutcome, registry: &RuleRegistry) -> String {
         "results": results
     });
 
+    let mut run_properties = serde_json::Map::new();
     if let Some(truncation) = outcome.truncation {
-        run["properties"] = json!({ "truncation": truncation });
+        run_properties.insert(
+            "truncation".to_string(),
+            serde_json::to_value(truncation).unwrap_or(Value::Null),
+        );
         run["invocations"] = json!([{
             "executionSuccessful": true,
             "toolExecutionNotifications": [{
@@ -799,6 +867,15 @@ pub fn render_sarif(outcome: &ScanOutcome, registry: &RuleRegistry) -> String {
                 }
             }]
         }]);
+    }
+    if let Some(baseline) = baseline {
+        run_properties.insert(
+            "baseline".to_string(),
+            serde_json::to_value(baseline).unwrap_or(Value::Null),
+        );
+    }
+    if !run_properties.is_empty() {
+        run["properties"] = Value::Object(run_properties);
     }
 
     let document = json!({
@@ -1436,6 +1513,88 @@ mod tests {
         ] {
             assert!(finding.get(key).is_some(), "finding missing key: {key}");
         }
+    }
+
+    #[test]
+    fn json_report_includes_baseline_status_and_counts() {
+        use crate::baseline::{self, Baseline, BaselineEntry};
+
+        let (mut outcome, _) = sample();
+        let mut extra = outcome.findings[0].clone();
+        extra.fingerprint = "extra-new-fingerprint".to_string();
+        outcome.findings.push(extra);
+
+        let mut baseline = Baseline::from_findings(&outcome.findings[..outcome.findings.len() - 1]);
+        baseline.findings.push(BaselineEntry {
+            fingerprint: "resolved-fingerprint".to_string(),
+            rule_id: "SS-001".to_string(),
+            file: "src/gone.rs".to_string(),
+            severity: Severity::High,
+            title: "Gone".to_string(),
+        });
+
+        let comparison = baseline::compare(&outcome.findings, &baseline);
+        let report = BaselineReport::from_comparison(&outcome.findings, &comparison, true);
+
+        let text = render_json_with_baseline(&outcome, Some(&report)).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+
+        assert_eq!(value["baseline"]["new"], 1);
+        assert_eq!(value["baseline"]["resolved"], 1);
+        assert_eq!(
+            value["baseline"]["existing"].as_u64().unwrap() as usize,
+            outcome.findings.len() - 1
+        );
+        assert_eq!(
+            value["baseline"]["resolved_findings"][0]["fingerprint"],
+            "resolved-fingerprint"
+        );
+
+        let findings = value["findings"].as_array().unwrap();
+        assert_eq!(findings.len(), outcome.findings.len());
+        assert_eq!(findings.last().unwrap()["baseline_status"], "new");
+        assert!(findings[..findings.len() - 1]
+            .iter()
+            .all(|finding| finding["baseline_status"] == "existing"));
+    }
+
+    #[test]
+    fn json_report_omits_baseline_fields_without_a_baseline() {
+        let (outcome, _) = sample();
+        let text = render_json(&outcome).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+
+        assert!(value.get("baseline").is_none());
+        for finding in value["findings"].as_array().unwrap() {
+            assert!(finding.get("baseline_status").is_none());
+        }
+    }
+
+    #[test]
+    fn sarif_report_maps_baseline_status_into_properties() {
+        use crate::baseline::{self, Baseline};
+
+        let (mut outcome, registry) = sample();
+        let mut extra = outcome.findings[0].clone();
+        extra.fingerprint = "extra-new-fingerprint".to_string();
+        outcome.findings.push(extra);
+
+        let baseline = Baseline::from_findings(&outcome.findings[..outcome.findings.len() - 1]);
+        let comparison = baseline::compare(&outcome.findings, &baseline);
+        let report = BaselineReport::from_comparison(&outcome.findings, &comparison, true);
+
+        let text = render_sarif_with_baseline(&outcome, &registry, Some(&report));
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+
+        assert_eq!(value["runs"][0]["properties"]["baseline"]["new"], 1);
+        let results = value["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(
+            results.last().unwrap()["properties"]["baselineStatus"],
+            "new"
+        );
+        assert!(results[..results.len() - 1]
+            .iter()
+            .all(|result| result["properties"]["baselineStatus"] == "existing"));
     }
 
     #[test]
