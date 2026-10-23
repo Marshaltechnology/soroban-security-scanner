@@ -280,6 +280,121 @@ impl Comparison {
     }
 }
 
+/// Baseline state of a finding in machine-readable reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BaselineStatus {
+    /// The finding is not present in the baseline.
+    New,
+    /// The finding is already accepted by the baseline.
+    Existing,
+    /// A baseline entry no longer present in the scan.
+    Resolved,
+}
+
+impl BaselineStatus {
+    /// Stable lowercase name used in machine-readable reports.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BaselineStatus::New => "new",
+            BaselineStatus::Existing => "existing",
+            BaselineStatus::Resolved => "resolved",
+        }
+    }
+}
+
+/// A resolved baseline entry included in machine-readable reports.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ResolvedFinding {
+    /// Stable finding fingerprint.
+    pub fingerprint: String,
+    /// Rule id.
+    pub rule_id: String,
+    /// Scan-root-relative file.
+    pub file: String,
+    /// Severity at the time the baseline was written.
+    pub severity: Severity,
+    /// Finding title.
+    pub title: String,
+}
+
+/// Baseline comparison summary for machine-readable reports.
+///
+/// The per-finding statuses are looked up by fingerprint and are not serialized
+/// on their own: JSON findings carry `baseline_status` and SARIF results carry
+/// `properties.baselineStatus`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BaselineReport {
+    /// Number of findings not present in the baseline.
+    pub new: usize,
+    /// Number of findings already accepted by the baseline.
+    pub existing: usize,
+    /// Number of baseline entries no longer present in the scan.
+    pub resolved: usize,
+    /// Resolved entries; empty when the scan runs in incremental mode.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub resolved_findings: Vec<ResolvedFinding>,
+    #[serde(skip)]
+    statuses: BTreeMap<String, BaselineStatus>,
+}
+
+impl BaselineReport {
+    /// Builds a report from a comparison.
+    ///
+    /// Set `include_resolved` to false for incremental scans, which do not
+    /// treat missing findings as resolved.
+    pub fn from_comparison(
+        findings: &[Finding],
+        comparison: &Comparison,
+        include_resolved: bool,
+    ) -> Self {
+        let mut statuses = BTreeMap::new();
+        for &index in &comparison.new {
+            if let Some(finding) = findings.get(index) {
+                statuses.insert(finding.fingerprint.clone(), BaselineStatus::New);
+            }
+        }
+        for &index in &comparison.existing {
+            if let Some(finding) = findings.get(index) {
+                statuses.insert(finding.fingerprint.clone(), BaselineStatus::Existing);
+            }
+        }
+
+        let resolved_findings = if include_resolved {
+            comparison
+                .resolved
+                .iter()
+                .map(|entry| ResolvedFinding {
+                    fingerprint: entry.fingerprint.clone(),
+                    rule_id: entry.rule_id.clone(),
+                    file: entry.file.clone(),
+                    severity: entry.severity,
+                    title: entry.title.clone(),
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        BaselineReport {
+            new: comparison.new_count(),
+            existing: comparison.existing_count(),
+            resolved: if include_resolved {
+                comparison.resolved_count()
+            } else {
+                0
+            },
+            resolved_findings,
+            statuses,
+        }
+    }
+
+    /// Status of a finding, looked up by fingerprint.
+    pub fn status(&self, fingerprint: &str) -> Option<BaselineStatus> {
+        self.statuses.get(fingerprint).copied()
+    }
+}
+
 /// Compares findings against a baseline by fingerprint.
 pub fn compare(findings: &[Finding], baseline: &Baseline) -> Comparison {
     let baseline_fingerprints = baseline.fingerprints();
@@ -509,5 +624,42 @@ mod tests {
         let truncated = "version = 1\ntool = \"soroban-scan\"\nfindings = [\n";
         let error = Baseline::from_toml(truncated).unwrap_err().to_string();
         assert!(error.contains("baseline TOML"), "got: {error}");
+    }
+
+    #[test]
+    fn baseline_report_maps_new_existing_and_resolved() {
+        let kept = finding("src/lib.rs", 10, "keep");
+        let fresh = finding("src/lib.rs", 20, "fresh");
+        let gone = finding("src/lib.rs", 30, "gone");
+
+        let baseline = Baseline::from_findings(&[kept.clone(), gone.clone()]);
+        let findings = vec![kept.clone(), fresh.clone()];
+        let comparison = compare(&findings, &baseline);
+        let report = BaselineReport::from_comparison(&findings, &comparison, true);
+
+        assert_eq!(report.new, 1);
+        assert_eq!(report.existing, 1);
+        assert_eq!(report.resolved, 1);
+        assert_eq!(report.resolved_findings.len(), 1);
+        assert_eq!(report.resolved_findings[0].fingerprint, gone.fingerprint);
+        assert_eq!(
+            report.status(&kept.fingerprint),
+            Some(BaselineStatus::Existing)
+        );
+        assert_eq!(report.status(&fresh.fingerprint), Some(BaselineStatus::New));
+        assert_eq!(report.status(&gone.fingerprint), None);
+    }
+
+    #[test]
+    fn incremental_baseline_report_does_not_count_resolved() {
+        let kept = finding("src/lib.rs", 10, "keep");
+        let gone = finding("src/lib.rs", 30, "gone");
+        let baseline = Baseline::from_findings(&[kept.clone(), gone]);
+        let findings = vec![kept];
+        let comparison = compare(&findings, &baseline);
+        let report = BaselineReport::from_comparison(&findings, &comparison, false);
+
+        assert_eq!(report.resolved, 0);
+        assert!(report.resolved_findings.is_empty());
     }
 }
