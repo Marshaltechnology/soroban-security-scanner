@@ -58,6 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Machine-readable reports now carry baseline comparison state: JSON adds a
   top-level `baseline` summary and per-finding `baseline_status`, and SARIF adds
   `properties.baselineStatus` plus `runs[0].properties.baseline` (`#155`).
+- Baseline comparison builds one reusable fingerprint index and makes a single
+  pass over the findings. Baseline documents above 64 MiB are rejected before
+  parsing, and a large-baseline benchmark documents the measured cost (`#159`).
 - Add an editor integration (LSP) spike covering a minimal diagnostics provider,
   core-library reuse, protocol scope, security, testing, and follow-up tasks
   (`#168`).
