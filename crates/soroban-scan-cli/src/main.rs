@@ -658,9 +658,7 @@ fn run_scan(args: ScanArgs, registry: &RuleRegistry) -> CliResult<u8> {
     }
 
     if let Some(path) = &args.prune_baseline {
-        let text = std::fs::read_to_string(path).map_err(|e| {
-            CliError::Runtime(format!("cannot read baseline {}: {e}", path.display()))
-        })?;
+        let text = read_baseline_text(path)?;
         let baseline = Baseline::from_text(&text).map_err(|error| baseline_error(path, error))?;
         let (pruned, removed) = baseline.prune(&outcome.findings);
         let format = args
@@ -684,9 +682,7 @@ fn run_scan(args: ScanArgs, registry: &RuleRegistry) -> CliResult<u8> {
     if !args.baseline.is_empty() {
         let mut baselines = Vec::with_capacity(args.baseline.len());
         for path in &args.baseline {
-            let text = std::fs::read_to_string(path).map_err(|e| {
-                CliError::Runtime(format!("cannot read baseline {}: {e}", path.display()))
-            })?;
+            let text = read_baseline_text(path)?;
             baselines
                 .push(Baseline::from_text(&text).map_err(|error| baseline_error(path, error))?);
         }
@@ -1553,6 +1549,22 @@ fn validate_rule_ids(config: &ScanConfig, registry: &RuleRegistry) -> CliResult<
         }
     }
     Ok(())
+}
+
+/// Reads a baseline file, rejecting documents above the parser memory bound.
+fn read_baseline_text(path: &Path) -> CliResult<String> {
+    let metadata = std::fs::metadata(path)
+        .map_err(|e| CliError::Runtime(format!("cannot read baseline {}: {e}", path.display())))?;
+    if metadata.len() > baseline::MAX_BASELINE_BYTES as u64 {
+        return Err(CliError::Runtime(format!(
+            "baseline {} is too large ({} bytes; limit {} bytes)",
+            path.display(),
+            metadata.len(),
+            baseline::MAX_BASELINE_BYTES
+        )));
+    }
+    std::fs::read_to_string(path)
+        .map_err(|e| CliError::Runtime(format!("cannot read baseline {}: {e}", path.display())))
 }
 
 fn serialize_baseline(baseline: &Baseline, format: BaselineFormatArg) -> CliResult<String> {
